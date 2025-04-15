@@ -1,20 +1,23 @@
 import os
 import logging
-from telegram import (
-    Update, InlineKeyboardMarkup, InlineKeyboardButton
-)
+from flask import Flask, request
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, ContextTypes, filters
 )
 from config import TELEGRAM_BOT_TOKEN, ADMIN_ID
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Стан FSM
+# FSM стани
 ASK_PHONE, ASK_QUESTION = range(2)
 banned_users = set()
+
+# Flask додаток для Webhook
+flask_app = Flask(__name__)
+app = None  # Telegram Application
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -34,7 +37,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Після натискання кнопки
+# Кнопки
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -49,13 +52,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text("Введіть, будь ласка, свій номер телефону 📱")
     return ASK_PHONE
 
-# Збір телефону
+# Ввід телефону
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["phone"] = update.message.text
-    await update.message.reply_text("Дякуємо! А тепер напишіть своє запитання 📝")
+    await update.message.reply_text("Дякую! Тепер напишіть своє запитання 📝")
     return ASK_QUESTION
 
-# Збір запитання і надсилання адміну
+# Ввід запитання
 async def finish_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     question = update.message.text
     phone = context.user_data.get("phone", "Невідомо")
@@ -75,12 +78,22 @@ async def finish_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Дякуємо! Ваше звернення надіслано.")
     return ConversationHandler.END
 
-# Вихід з діалогу
+# Скасування
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Скасовано.")
     return ConversationHandler.END
 
+# Webhook endpoint
+@flask_app.post("/")
+async def webhook():
+    update = Update.de_json(request.get_json(force=True), app.bot)
+    await app.update_queue.put(update)
+    return "ok"
+
 def main():
+    global app
+    BOT_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render змінна
+
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
@@ -94,7 +107,12 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv_handler)
-    app.run_polling()
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 8080)),
+        webhook_url=f"{BOT_URL}/"
+    )
 
 if __name__ == "__main__":
     main()
