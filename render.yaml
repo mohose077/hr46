@@ -5,3 +5,13 @@ services:
     plan: free
     buildCommand: ""
     startCommand: "python bot.py"
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: brigade-telegram-bot
+          property: url
